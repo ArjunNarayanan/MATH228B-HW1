@@ -1,4 +1,5 @@
-using LinearAlgebra, Plots
+using BenchmarkTools
+using LinearAlgebra, Plots, SparseArrays
 
 N1(xi,eta) = +(xi - 1.0)*(eta - 1.0)/4.0
 dN1(xi,eta) = 0.25*[(eta-1.0)  (xi-1.0)]
@@ -70,6 +71,11 @@ function determinant(jac::Matrix)
     return jac[1,1]*jac[2,2] - jac[1,2]*jac[2,1]
 end
 
+function pullback(jac::Matrix, spatial_normal::Vector)
+    return [jac[2,2]*spatial_normal[1] - jac[1,2]*spatial_normal[2],
+           -jac[2,1]*spatial_normal[1] + jac[1,1]*spatial_normal[2]]
+end
+
 function diffeq_coefficients(jac::Matrix,hess::Array{T,3},J) where {T}
     a = jac[1,2]^2 + jac[2,2]^2
     b = jac[1,1]*jac[1,2] + jac[2,1]*jac[2,2]
@@ -99,8 +105,9 @@ function stencil_coefficients(jac::Matrix, hess::Array{T,3},J,h) where {T}
     V6 = (C3/h2 - C5/(2h))
     V7 = -C2/(4h2)
     V8 = (C1/h2 - C4/(2h)) + C2/(4h2)
+    V9 = C2/(4h2)
 
-    return V1, V2, V3, V4, V5, V6, V7, V8
+    return V1, V2, V3, V4, V5, V6, V7, V8, V9
 end
 
 function interpolate(vals::Matrix, xi, eta)
@@ -170,10 +177,14 @@ function assemblePoisson(N::Int, spatial_corners::Matrix)
         for i in 1:N
             r = indexToDOF(i,j,N)
             if !onBoundary(i,j,N)
+                xi = xrange[j]
+                eta = xrange[i]
+
                 col = indexToDOF(stencilIdx(i,j),N)
-                inverse_jacobian = inv(jacobian(spatial_corners, xrange[j], xrange[i]))
-                M = inverse_jacobian'*inverse_jacobian
-                coeffs = stencilCoefficients(M,dx)
+                jac = jacobian(spatial_corners,xi,eta)
+                hess = hessian(spatial_corners, xi, eta)
+                J = determinant(jac)
+                coeffs = stencil_coefficients(jac,hess,J,dx)
                 row = repeat([r],9)
                 append!(rows, row)
                 append!(cols, col)
@@ -200,10 +211,13 @@ const dx = 2.0/(N - 1)
 
 spatial_corners = corners(B,L,H)
 
-tuple_idx = stencilIdx(2,2)
-dof_idx = indexToDOF(tuple_idx,N)
+jac = jacobian(spatial_corners, -1.0, 0.0)
+J = determinant(jac)
+spatial_normal = [1.0,0.0]
+ref_normal = pullback(jac, spatial_normal)
 
-
+# rows, cols, vals = assemblePoisson(N, spatial_corners)
+# A = sparse(rows,cols,vals)
 # rows, cols, vals = assemblePoisson(N, spatial_corners)
 
 # xrange = -1:dx:1
