@@ -2,15 +2,23 @@ using LinearAlgebra, Plots
 
 N1(xi,eta) = +(xi - 1.0)*(eta - 1.0)/4.0
 dN1(xi,eta) = 0.25*[(eta-1.0)  (xi-1.0)]
+d2N1(xi,eta) = [0.0 0.25
+                0.25 0.0]
 
 N2(xi,eta) = -(xi + 1.0)*(eta - 1.0)/4.0
 dN2(xi,eta) = -0.25*[(eta-1.0)  (xi+1.0)]
+d2N2(xi,eta) = [0.0  -0.25
+               -0.25 0.0]
 
 N3(xi,eta) = +(xi + 1.0)*(eta + 1.0)/4.0
 dN3(xi,eta) = 0.25*[(eta+1.0)  (xi+1.0)]
+d2N3(xi,eta) = [0.0 0.25
+                0.25 0.0]
 
 N4(xi,eta) = -(xi - 1.0)*(eta + 1.0)/4.0
 dN4(xi,eta) = -0.25*[(eta+1.0)  (xi-1.0)]
+d2N4(xi,eta) = [0.0 -0.25
+               -0.25 0.0]
 
 function corners(B,L,H)
     D = (L - B)/2.0
@@ -29,8 +37,70 @@ function gradient(xi,eta)
     return vcat(dN1(xi,eta),dN2(xi,eta),dN3(xi,eta),dN4(xi,eta))
 end
 
+function hessian(xi,eta)
+    return [d2N1(xi,eta), d2N2(xi,eta), d2N3(xi,eta), d2N4(xi,eta)]
+end
+
+function mul_point_hessian(p,NH)
+    h = zeros(2,2,2)
+    for i in 1:2
+        for j in 1:2
+            for k in 1:2
+                h[i,j,k] = p[i]*NH[j,k]
+            end
+        end
+    end
+    return h
+end
+
 function jacobian(points::Matrix, xi,eta)
     return points*gradient(xi,eta)
+end
+
+function hessian(points::Matrix, xi, eta)
+    h = zeros(2,2,2)
+    NH = hessian(xi,eta)
+    for i in 1:size(points)[2]
+        h = h + mul_point_hessian(view(points,:,i),NH[i])
+    end
+    return h
+end
+
+function determinant(jac::Matrix)
+    return jac[1,1]*jac[2,2] - jac[1,2]*jac[2,1]
+end
+
+function diffeq_coefficients(jac::Matrix,hess::Array{T,3},J) where {T}
+    a = jac[1,2]^2 + jac[2,2]^2
+    b = jac[1,1]*jac[1,2] + jac[2,1]*jac[2,2]
+    c = jac[1,1]^2 + jac[2,1]^2
+    alpha = a*hess[1,1,1] - 2*b*hess[1,1,2] + c*hess[1,2,2]
+    beta  = a*hess[2,1,1] - 2*b*hess[2,1,2] + c*hess[2,2,2]
+    d = (jac[1,2]*beta - jac[2,2]*alpha)/J
+    e = (jac[2,1]*alpha - jac[1,1]*beta)/J
+    return a,b,c,d,e
+end
+
+function stencil_coefficients(jac::Matrix, hess::Array{T,3},J,h) where {T}
+    a,b,c,d,e = diffeq_coefficients(jac,hess,J)
+    J2 = J^2
+    C1 = -a/J2
+    C2 = 2b/J2
+    C3 = -c/J2
+    C4 = -d/J2
+    C5 = -e/J2
+
+    h2 = h^2
+    V1 = C2/(4h2)
+    V2 = (C1/h2 + C4/(2h))
+    V3 = -C2/(4h2)
+    V4 = (C3/h2 + C5/(2h))
+    V5 = -2/h2*(C1 + C3)
+    V6 = (C3/h2 - C5/(2h))
+    V7 = -C2/(4h2)
+    V8 = (C1/h2 - C4/(2h)) + C2/(4h2)
+
+    return V1, V2, V3, V4, V5, V6, V7, V8
 end
 
 function interpolate(vals::Matrix, xi, eta)
@@ -85,14 +155,7 @@ function indexToDOF(idx::Vector{Tuple{Int,Int}},N)
 end
 
 function stencilIdx(i,j)
-    return [(p,q) for p in i-1:i+1 for q in j-1:j+1]
-end
-
-function stencilCoefficients(M::Matrix,dx)
-    mid = (M[1,2] + M[2,1])/(2.0*dx)
-    ymax = M[2,2]/dx^2
-    xmax = M[1,1]/dx^2
-    return [mid, ymax, -mid, xmax, -2.0*(xmax+ymax), xmax, -mid, ymax, mid]
+    return [(p,q) for q in j+1:-1:j-1 for p in i+1:-1:i-1]
 end
 
 function assemblePoisson(N::Int, spatial_corners::Matrix)
@@ -133,9 +196,15 @@ const H = 1.0
 
 const N = 3
 const dx = 2.0/(N - 1)
+
+
 spatial_corners = corners(B,L,H)
 
-rows, cols, vals = assemblePoisson(N, spatial_corners)
+tuple_idx = stencilIdx(2,2)
+dof_idx = indexToDOF(tuple_idx,N)
+
+
+# rows, cols, vals = assemblePoisson(N, spatial_corners)
 
 # xrange = -1:dx:1
 # points = map_to_spatial(xrange, spatial_corners)
