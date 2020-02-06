@@ -1,5 +1,5 @@
 using BenchmarkTools
-using LinearAlgebra, Plots, SparseArrays
+using LinearAlgebra, PyPlot, SparseArrays, Statistics, Printf
 
 N1(xi,eta) = +(xi - 1.0)*(eta - 1.0)/4.0
 dN1(xi,eta) = 0.25*[(eta-1.0)  (xi-1.0)]
@@ -87,7 +87,7 @@ function diffeq_coefficients(jac::Matrix,hess::Array{T,3},J) where {T}
     return a,b,c,d,e
 end
 
-function stencil_coefficients(jac::Matrix, hess::Array{T,3},J,h) where {T}
+function stencilCoefficients(jac::Matrix, hess::Array{T,3},J,h) where {T}
     a,b,c,d,e = diffeq_coefficients(jac,hess,J)
     J2 = J^2
     C1 = -a/J2
@@ -104,7 +104,7 @@ function stencil_coefficients(jac::Matrix, hess::Array{T,3},J,h) where {T}
     V5 = -2/h2*(C1 + C3)
     V6 = (C3/h2 - C5/(2h))
     V7 = -C2/(4h2)
-    V8 = (C1/h2 - C4/(2h)) + C2/(4h2)
+    V8 = (C1/h2 - C4/(2h))
     V9 = C2/(4h2)
 
     return V1, V2, V3, V4, V5, V6, V7, V8, V9
@@ -142,7 +142,11 @@ function onBoundary(i::Int,j::Int,N::Int)
 end
 
 function onLeftBoundary(i::Int,j::Int,N::Int)
-    return (j == 1 ? true : false)
+    return (j == 1 && i > 1 && i < N ? true : false)
+end
+
+function onLeftCorner(i,j,N)
+    return (j == 1 && i == N ? true : false)
 end
 
 function onRightBoundary(i,j,N)
@@ -165,6 +169,30 @@ function stencilIdx(i,j)
     return [(p,q) for q in j+1:-1:j-1 for p in i+1:-1:i-1]
 end
 
+function stencilLeftBoundary(i,j)
+    return [(i,j+2), (i,j+1), (i+1,j), (i,j), (i-1,j)]
+end
+
+function stencilLeftCorner(i,j)
+    [(i,j+2), (i,j+1), (i,j), (i-1,j), (i-2,j)]
+end
+
+function stencilCoefficientsLeftCorner(n::Vector)
+    return [-1.0n[1], 4n[1], (-3n[1]+3n[2]), -4n[2], n[2]]
+end
+
+function stencilCoefficientsLeftBoundary(n::Vector)
+    return [-1.0n[1], 4n[1], n[2], -3n[1], -n[2]]
+end
+
+function stencilTopBoundary(i,j)
+    return [(i,j+1), (i,j), (i,j-1), (i-1,j), (i-2,j)]
+end
+
+function stencilCoefficientsTopBoundary(n::Vector)
+    return [1.0n[1], 3n[2], -n[1], -4n[2], n[2]]
+end
+
 function assemblePoisson(N::Int, spatial_corners::Matrix)
     xrange = range(-1.0, stop = 1.0, length = N)
     dx = xrange[2] - xrange[1]
@@ -176,15 +204,14 @@ function assemblePoisson(N::Int, spatial_corners::Matrix)
     for j in 1:N
         for i in 1:N
             r = indexToDOF(i,j,N)
+            xi = xrange[j]
+            eta = xrange[i]
+            jac = jacobian(spatial_corners,xi,eta)
+            J = determinant(jac)
             if !onBoundary(i,j,N)
-                xi = xrange[j]
-                eta = xrange[i]
-
                 col = indexToDOF(stencilIdx(i,j),N)
-                jac = jacobian(spatial_corners,xi,eta)
                 hess = hessian(spatial_corners, xi, eta)
-                J = determinant(jac)
-                coeffs = stencil_coefficients(jac,hess,J,dx)
+                coeffs = stencilCoefficients(jac,hess,J,dx)
                 row = repeat([r],9)
                 append!(rows, row)
                 append!(cols, col)
@@ -194,32 +221,92 @@ function assemblePoisson(N::Int, spatial_corners::Matrix)
                 append!(cols, r)
                 append!(vals, 1.0)
             elseif onLeftBoundary(i,j,N)
-
+                col = indexToDOF(stencilLeftBoundary(i,j),N)
+                spatial_normal = [-1.0,0.0]
+                ref_normal = pullback(jac, spatial_normal)
+                coeffs = stencilCoefficientsLeftBoundary(ref_normal)
+                row = repeat([r],5)
+                append!(rows,row)
+                append!(cols,col)
+                append!(vals,coeffs)
+            elseif onLeftCorner(i,j,N)
+                col = indexToDOF(stencilLeftCorner(i,j),N)
+                spatial_normal = [-1.0,0.0]
+                ref_normal = pullback(jac, spatial_normal)
+                coeffs = stencilCoefficientsLeftCorner(ref_normal)
+                row = repeat([r],5)
+                append!(rows,row)
+                append!(cols,col)
+                append!(vals,coeffs)
+            elseif onTopBoundary(i,j,N)
+                col = indexToDOF(stencilTopBoundary(i,j),N)
+                spatial_normal = [0.0,1.0]
+                ref_normal = pullback(jac, spatial_normal)
+                coeffs = stencilCoefficientsTopBoundary(ref_normal)
+                row = repeat([r],5)
+                append!(rows,row)
+                append!(cols,col)
+                append!(vals,coeffs)
             end
         end
     end
-    return rows, cols, vals
+    A = sparse(rows,cols,vals)
+    return A, xrange
+end
+
+function assembleRHS(N::Int)
+    ndofs = N^2
+    rhs = zeros(ndofs)
+    for j in 1:N
+        for i in 1:N
+            r = indexToDOF(i,j,N)
+            if !onBoundary(i,j,N)
+                rhs[r] = 1.0
+            end
+        end
+    end
+    return rhs
+end
+
+function solveProblem(L,B,H,N)
+    dx = 2.0/(N - 1)
+    spatial_corners = corners(B,L,H)
+    A, xrange = assemblePoisson(N, spatial_corners)
+    rhs = assembleRHS(N)
+    sol = A\rhs
+    Q = sum(sol)*dx^2
+
+    return sol, Q
 end
 
 const L = 3.0
 const B = 0.5
 const H = 1.0
 
-const N = 3
-const dx = 2.0/(N - 1)
-
-
 spatial_corners = corners(B,L,H)
+N = 80
+# const dx = 2.0/(N - 1)
 
-jac = jacobian(spatial_corners, -1.0, 0.0)
-J = determinant(jac)
-spatial_normal = [1.0,0.0]
-ref_normal = pullback(jac, spatial_normal)
+# Nrange = [10,20,40,80]
+# hrange = [2.0/(N-1) for N in Nrange]
+# Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
+# Qrange = [abs(q - Qrange[end]) for q in Qrange]
+# fig, ax = PyPlot.subplots()
+# ax.loglog(hrange[1:end-1],Qrange[1:end-1],"-o")
+# ax.grid()
+# s = mean(diff(log.(Qrange[1:end-1])) ./ diff(log.(hrange[1:end-1])))
+# msg = @sprintf "Mean slope = %1.2f" s
+# ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
+# fig
 
-# rows, cols, vals = assemblePoisson(N, spatial_corners)
-# A = sparse(rows,cols,vals)
-# rows, cols, vals = assemblePoisson(N, spatial_corners)
-
-# xrange = -1:dx:1
-# points = map_to_spatial(xrange, spatial_corners)
-# scatter(points[1,:], points[2,:], aspect_ratio = 1.0)
+xrange = range(-1, stop = 1, length = N)
+sol,Q = solveProblem(L,B,H,N)
+spatial_points = map_to_spatial(xrange, spatial_corners)
+X = reshape(spatial_points[1,:], N, N)
+Y = reshape(spatial_points[2,:], N, N)
+U = reshape(sol, N, N)
+fig, ax = PyPlot.subplots()
+cp = ax.contour(X, Y, U, levels = collect(0.0:0.02:0.2))
+ax.clabel(cp, inline=true, fontsize=10)
+ax.set_aspect(1.0)
+fig
