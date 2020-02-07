@@ -149,6 +149,14 @@ function onLeftCorner(i,j,N)
     return (j == 1 && i == N ? true : false)
 end
 
+function onCorners(i,j,N)
+    if (i == 1 || i == N) && (j == 1 || j == N)
+        return true
+    else
+        return false
+    end
+end
+
 function onRightBoundary(i,j,N)
     return (j == N ? true : false)
 end
@@ -274,9 +282,26 @@ function solveProblem(L,B,H,N)
     A, xrange = assemblePoisson(N, spatial_corners)
     rhs = assembleRHS(N)
     sol = A\rhs
-    Q = sum(sol)*dx^2
+    Q = simpson_integrate(sol,N,dx)
 
     return sol, Q
+end
+
+function simpson_integrate(sol::Vector, N::Int, dx)
+    integral = 0.0
+    for i in 1:N
+        for j in 1:N
+            r = indexToDOF(i,j,N)
+            if onCorners(i,j,N)
+                integral += 0.25*sol[r]
+            elseif onBoundary(i,j,N)
+                integral += 0.5*sol[r]
+            else
+                integral += sol[r]
+            end
+        end
+    end
+    return dx^2*integral
 end
 
 const L = 3.0
@@ -285,28 +310,31 @@ const H = 1.0
 
 spatial_corners = corners(B,L,H)
 N = 80
-# const dx = 2.0/(N - 1)
+dx = 2.0/(N-1)
 
-# Nrange = [10,20,40,80]
-# hrange = [2.0/(N-1) for N in Nrange]
-# Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
-# Qrange = [abs(q - Qrange[end]) for q in Qrange]
-# fig, ax = PyPlot.subplots()
-# ax.loglog(hrange[1:end-1],Qrange[1:end-1],"-o")
-# ax.grid()
-# s = mean(diff(log.(Qrange[1:end-1])) ./ diff(log.(hrange[1:end-1])))
-# msg = @sprintf "Mean slope = %1.2f" s
-# ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
-# fig
-
-xrange = range(-1, stop = 1, length = N)
-sol,Q = solveProblem(L,B,H,N)
-spatial_points = map_to_spatial(xrange, spatial_corners)
-X = reshape(spatial_points[1,:], N, N)
-Y = reshape(spatial_points[2,:], N, N)
-U = reshape(sol, N, N)
+Nrange = [10,20,40,80]
+hrange = [2.0/(N-1) for N in Nrange]
+Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
+Qrange = [abs(q - Qrange[end]) for q in Qrange]
 fig, ax = PyPlot.subplots()
-cp = ax.contour(X, Y, U, levels = collect(0.0:0.02:0.2))
-ax.clabel(cp, inline=true, fontsize=10)
-ax.set_aspect(1.0)
+ax.loglog(hrange[1:end-1],Qrange[1:end-1],"-o")
+ax.grid()
+s = mean(diff(log.(Qrange[1:end-1])) ./ diff(log.(hrange[1:end-1])))
+msg = @sprintf "Mean slope = %1.2f" s
+ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
 fig
+
+# xrange = range(-1, stop = 1, length = N)
+# sol,Q = solveProblem(L,B,H,N)
+# Q1 = sum(sol)*dx^2
+# println("Difference = ", abs(Q - Q1))
+# spatial_points = map_to_spatial(xrange, spatial_corners)
+# X = reshape(spatial_points[1,:], N, N)
+# Y = reshape(spatial_points[2,:], N, N)
+# U = reshape(sol, N, N)
+#
+# fig, ax = PyPlot.subplots()
+# cp = ax.contour(X, Y, U, levels = collect(0.0:0.02:0.2))
+# ax.clabel(cp, inline=true, fontsize=10)
+# ax.set_aspect(1.0)
+# fig
