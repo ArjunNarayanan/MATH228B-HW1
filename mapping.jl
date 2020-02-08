@@ -284,7 +284,24 @@ function solveProblem(L,B,H,N)
     sol = A\rhs
     Q = simpson_integrate(sol,N,dx)
 
-    return sol, Q
+    return sol, Q, xrange
+end
+
+function plot_contour(sol, xrange, N, spatial_corners; filename = "")
+    spatial_points = map_to_spatial(xrange, spatial_corners)
+    X = reshape(spatial_points[1,:], N, N)
+    Y = reshape(spatial_points[2,:], N, N)
+    U = reshape(sol, N, N)
+    fig, ax = PyPlot.subplots()
+    cp = ax.contour(X, Y, U, levels = collect(0.0:0.02:0.2))
+    ax.clabel(cp, inline = true, fontsize = 10)
+    # ax.set_aspect(1.0)
+    ax.grid()
+    if length(filename) > 0
+        fig.savefig(filename)
+    else
+        return fig
+    end
 end
 
 function simpson_integrate(sol::Vector, N::Int, dx)
@@ -304,25 +321,46 @@ function simpson_integrate(sol::Vector, N::Int, dx)
     return dx^2*integral
 end
 
+function plot_convergence(hrange,Qerror; title = "", filename = "")
+    fig, ax = PyPlot.subplots()
+    ax.loglog(hrange,Qerror,"-o")
+    ax.set_title(title)
+    ax.grid()
+    s = mean(diff(log.(Qerror)) ./ diff(log.(hrange)))
+    msg = @sprintf "Mean slope = %1.2f" s
+    ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
+    if length(filename) > 0
+        fig.savefig(filename)
+    else
+        return fig
+    end
+end
+
 const L = 3.0
-const B = 0.5
+const B = 1.0
 const H = 1.0
 
 spatial_corners = corners(B,L,H)
-N = 80
+N = 20
 dx = 2.0/(N-1)
 
+# sol, Q, xrange = solveProblem(L,B,H,N)
+# plot_contour(sol, xrange, N, spatial_corners, filename = "benchmark_solution.png")
+
 Nrange = [10,20,40,80]
-hrange = [2.0/(N-1) for N in Nrange]
+hrange = [2.0/(N-1) for N in Nrange[1:end-1]]
 Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
-Qrange = [abs(q - Qrange[end]) for q in Qrange]
-fig, ax = PyPlot.subplots()
-ax.loglog(hrange[1:end-1],Qrange[1:end-1],"-o")
-ax.grid()
-s = mean(diff(log.(Qrange[1:end-1])) ./ diff(log.(hrange[1:end-1])))
-msg = @sprintf "Mean slope = %1.2f" s
-ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
-fig
+Qerror = [abs(q - Qrange[end]) for q in Qrange[1:end-1]]
+title = @sprintf "Convergence plot for B = %1.1f" B
+filename = @sprintf "Convergence-B-%1.1f.png" B
+plot_convergence(hrange,Qerror, title = title, filename = filename)
+# fig, ax = PyPlot.subplots()
+# ax.loglog(hrange[1:end-1],Qrange[1:end-1],"-o")
+# ax.grid()
+# s = mean(diff(log.(Qrange[1:end-1])) ./ diff(log.(hrange[1:end-1])))
+# msg = @sprintf "Mean slope = %1.2f" s
+# ax.annotate(msg, (0.5,0.3), xycoords = "axes fraction")
+# fig
 
 # xrange = range(-1, stop = 1, length = N)
 # sol,Q = solveProblem(L,B,H,N)
