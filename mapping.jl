@@ -325,6 +325,8 @@ function plot_convergence(hrange,Qerror; title = "", filename = "")
     fig, ax = PyPlot.subplots()
     ax.loglog(hrange,Qerror,"-o")
     ax.set_title(title)
+    ax.set_xlabel("Step size h")
+    ax.set_ylabel("Absolute error")
     ax.grid()
     s = mean(diff(log.(Qerror)) ./ diff(log.(hrange)))
     msg = @sprintf "Mean slope = %1.2f" s
