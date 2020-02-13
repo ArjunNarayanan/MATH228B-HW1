@@ -402,10 +402,10 @@ dx = 2.0/(N-1)
 sol, Q, xrange = solveProblem(L,B,H,N)
 plot_contour(sol, xrange, N, spatial_corners, filename = "benchmark_solution.png")
 
-# Nrange = [10,20,40,80]
-# hrange = [2.0/(N-1) for N in Nrange[1:end-1]]
-# Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
-# Qerror = [abs(q - Qrange[end]) for q in Qrange[1:end-1]]
-# title = @sprintf "Convergence plot for B = %1.1f" B
-# filename = @sprintf "Convergence-B-%1.1f.png" B
-# plot_convergence(hrange,Qerror, title = title, filename = filename)
+Nrange = [10,20,40,80]
+hrange = [2.0/(N-1) for N in Nrange[1:end-1]]
+Qrange = [solveProblem(L,B,H,N)[2] for N in Nrange]
+Qerror = [abs(q - Qrange[end]) for q in Qrange[1:end-1]]
+title = @sprintf "Convergence plot for B = %1.1f" B
+filename = @sprintf "Convergence-B-%1.1f.png" B
+plot_convergence(hrange,Qerror, title = title, filename = filename)
